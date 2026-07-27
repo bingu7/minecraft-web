@@ -478,15 +478,8 @@ const FS_SOURCE = `
     vec3 color = baseRGB * bright + skyLight * baseRGB;
 
     if (uIsWater) {
-      // 多波叠加水面波动
-      float wave1 = sin(vWorldPos.x * 2.0 + uTime * 1.5) * cos(vWorldPos.z * 2.0 + uTime * 1.2);
-      float wave2 = sin(vWorldPos.x * 5.0 - uTime * 2.0) * cos(vWorldPos.z * 4.0 + uTime * 1.8) * 0.5;
-      float waveSum = (wave1 + wave2) * 0.1;
-      color += vec3(0.1, 0.15, 0.2) * waveSum;
-      // 高光：模拟阳光在水面上的反射亮点
-      vec3 sunN = normalize(uSunDir);
-      float spec = max(dot(reflect(-sunN, n), vec3(0.0, 1.0, 0.0)), 0.0);
-      color += vec3(1.0, 0.95, 0.8) * pow(spec, 32.0) * 0.6 * waveSum;
+      float wave = sin(vWorldPos.x * 2.0 + uTime * 1.5) * cos(vWorldPos.z * 2.0 + uTime * 1.2) * 0.1;
+      color += vec3(0.1, 0.15, 0.2) * wave;
       color = mix(color, vec3(0.2, 0.4, 0.6), 0.3);
     }
 
@@ -495,13 +488,6 @@ const FS_SOURCE = `
     if (abs(n.y) < 0.1) ao = 0.80;
     else if (n.y < -0.5) ao = 0.60;
     color *= ao;
-
-    // 深度暗化：低于海平面的方块逐渐变暗（模拟洞穴/水下光照减弱）
-    float depthDark = 1.0;
-    if (vWorldPos.y < 26.0) {
-      depthDark = clamp(vWorldPos.y / 26.0 * 1.5 + 0.15, 0.15, 1.0);
-    }
-    color *= depthDark;
 
     // 雾
     vec3 fogColor = uFogColor;
@@ -570,15 +556,10 @@ function createTextureAtlas(gl) {
         let subCanvas = ctx.canvas;
         // 程序化纹理
         let rng = (x,y) => { let n = Math.sin(x*12.9898 + y*78.233 + bt*37) * 43758.5453; return n - Math.floor(n); };
-        let rng2 = (x,y) => { let n = Math.sin(x*94.31 + y*17.55 + bt*91) * 12583.7; return n - Math.floor(n); };
-        let rng3 = (x,y) => { let n = Math.sin(x*53.7 + y*158.2 + bt*55) * 73121.3; return n - Math.floor(n); };
         for (let x = 0; x < size; x++) {
           for (let y = 0; y < size; y++) {
-            // FBM: 3 层噪声叠加（大、中、细）
-            let n1 = rng(x + col2 * 17, y + row2 * 23) - 0.5;
-            let n2 = (rng2(x, y) - 0.5) * 0.5;
-            let n3 = (rng3(x, y) - 0.5) * 0.25;
-            let v = (n1 + n2 + n3) * 28;
+            let noise = rng(x + col2 * 17, y + row2 * 23);
+            let v = (noise - 0.5) * 25;
             let pr = Math.max(0, Math.min(255, r + v));
             let pg = Math.max(0, Math.min(255, g + v));
             let pb = Math.max(0, Math.min(255, b + v));
@@ -980,9 +961,6 @@ class Renderer {
       this.drawSelection(this.selBox);
       this.selBox = null;
     }
-
-    // 云朵层
-    this.drawClouds(player, time);
 
     // 第三人称时画玩家模型
     if (player.thirdPerson) {
