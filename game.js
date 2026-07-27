@@ -278,42 +278,72 @@ class World {
           }
           chunk.set(x, y, z, block);
         }
+        // 矿洞生成：y < 20 用 3D 噪声挖出洞穴
+        for (let y = 1; y < 20 && y < height; y++) {
+          let caveNoise1 = this.noise.noise3(wx * 0.06, y * 0.08, wz * 0.06);
+          let caveNoise2 = this.noise2.noise3(wx * 0.03, y * 0.04, wz * 0.03);
+          if (caveNoise1 > 0.5 && caveNoise2 > 0.3) {
+            // 挖空（保留基岩层 y=0）
+            chunk.set(x, y, z, BLOCK.AIR);
+          }
+        }
         // 水填充：只在低于海平面的地方填水
         for (let y = height + 1; y <= SEALEVEL; y++) {
           chunk.set(x, y, z, BLOCK.WATER);
         }
-        // 树
-        if (height >= SEALEVEL && height < SEALEVEL + 12) {
+        // 树（多种类型）
+        if (height >= SEALEVEL && height < SEALEVEL + 14) {
           let tn = this.treeNoise.noise3(wx * 0.5, 0, wz * 0.5);
-          if (tn > 0.75 && Math.random() < 0.3) {
-            this.placeTree(chunk, x, height + 1, z);
+          if (tn > 0.72 && Math.random() < 0.35) {
+            let treeType = Math.floor(Math.random() * 3); // 0=橡树,1=白桦,2=松树
+            this.placeTree(chunk, x, height + 1, z, treeType);
           }
         }
       }
     }
     chunk.dirty = true;
   }
-  placeTree(chunk, x, y, z) {
-    let h = 4 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < h; i++) {
-      if (y + i < WORLD_HEIGHT) chunk.set(x, y + i, z, BLOCK.WOOD);
-    }
-    // 树冠
-    let top = y + h - 1;
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dz = -2; dz <= 2; dz++) {
-        for (let dy = 0; dy <= 1; dy++) {
-          let nx = x + dx, ny = top + dy, nz = z + dz;
-          if (nx >= 0 && nx < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE && ny < WORLD_HEIGHT) {
-            if (Math.abs(dx) + Math.abs(dz) + dy < 4) {
-              if (chunk.get(nx, ny, nz) === BLOCK.AIR) chunk.set(nx, ny, nz, BLOCK.LEAVES);
-            }
-          }
+  placeTree(chunk, x, y, z, type = 0) {
+    if (type === 0) {
+      // 橡树：矮粗树冠
+      let h = 4 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < h; i++) if (y + i < WORLD_HEIGHT) chunk.set(x, y + i, z, BLOCK.WOOD);
+      let top = y + h - 1;
+      for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = 0; dy <= 1; dy++) {
+        let nx = x+dx, ny = top+dy, nz = z+dz;
+        if (nx>=0&&nx<CHUNK_SIZE&&nz>=0&&nz<CHUNK_SIZE&&ny<WORLD_HEIGHT)
+          if (Math.abs(dx)+Math.abs(dz)+dy < 4 && chunk.get(nx,ny,nz)===BLOCK.AIR) chunk.set(nx,ny,nz,BLOCK.LEAVES);
+      }
+      if (top+2<WORLD_HEIGHT) chunk.set(x, top+2, z, BLOCK.LEAVES);
+    } else if (type === 1) {
+      // 白桦：高瘦
+      let h = 5 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < h; i++) if (y+i < WORLD_HEIGHT) chunk.set(x, y+i, z, BLOCK.WOOD);
+      let top = y + h - 1;
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) for (let dy = 0; dy <= 1; dy++) {
+        let nx=x+dx, ny=top+dy, nz=z+dz;
+        if (nx>=0&&nx<CHUNK_SIZE&&nz>=0&&nz<CHUNK_SIZE&&ny<WORLD_HEIGHT)
+          if (Math.abs(dx)+Math.abs(dz)+dy < 3 && chunk.get(nx,ny,nz)===BLOCK.AIR) chunk.set(nx,ny,nz,BLOCK.LEAVES);
+      }
+      if (top+2<WORLD_HEIGHT) chunk.set(x, top+2, z, BLOCK.LEAVES);
+      if (top+3<WORLD_HEIGHT) chunk.set(x, top+3, z, BLOCK.LEAVES);
+    } else {
+      // 松树：层叠锥形
+      let h = 6 + Math.floor(Math.random() * 2);
+      for (let i = 0; i < h; i++) if (y+i < WORLD_HEIGHT) chunk.set(x, y+i, z, BLOCK.WOOD);
+      let top = y + h - 1;
+      // 从底部到顶逐层缩小树冠
+      for (let layer = 0; layer < 4; layer++) {
+        let ly = y + 2 + layer * 2;
+        let radius = layer < 2 ? 2 : 1;
+        for (let dx = -radius; dx <= radius; dx++) for (let dz = -radius; dz <= radius; dz++) {
+          let nx=x+dx, ny=ly, nz=z+dz;
+          if (nx>=0&&nx<CHUNK_SIZE&&nz>=0&&nz<CHUNK_SIZE&&ny<WORLD_HEIGHT)
+            if (Math.abs(dx)+Math.abs(dz) <= radius && chunk.get(nx,ny,nz)===BLOCK.AIR) chunk.set(nx,ny,nz,BLOCK.LEAVES);
         }
       }
+      if (top+1<WORLD_HEIGHT) chunk.set(x, top+1, z, BLOCK.LEAVES);
     }
-    // 顶部一片叶子
-    if (top + 2 < WORLD_HEIGHT) chunk.set(x, top + 2, z, BLOCK.LEAVES);
   }
 }
 
@@ -448,8 +478,15 @@ const FS_SOURCE = `
     vec3 color = baseRGB * bright + skyLight * baseRGB;
 
     if (uIsWater) {
-      float wave = sin(vWorldPos.x * 2.0 + uTime * 1.5) * cos(vWorldPos.z * 2.0 + uTime * 1.2) * 0.1;
-      color += vec3(0.1, 0.15, 0.2) * wave;
+      // 多波叠加水面波动
+      float wave1 = sin(vWorldPos.x * 2.0 + uTime * 1.5) * cos(vWorldPos.z * 2.0 + uTime * 1.2);
+      float wave2 = sin(vWorldPos.x * 5.0 - uTime * 2.0) * cos(vWorldPos.z * 4.0 + uTime * 1.8) * 0.5;
+      float waveSum = (wave1 + wave2) * 0.1;
+      color += vec3(0.1, 0.15, 0.2) * waveSum;
+      // 高光：模拟阳光在水面上的反射亮点
+      vec3 sunN = normalize(uSunDir);
+      float spec = max(dot(reflect(-sunN, n), vec3(0.0, 1.0, 0.0)), 0.0);
+      color += vec3(1.0, 0.95, 0.8) * pow(spec, 32.0) * 0.6 * waveSum;
       color = mix(color, vec3(0.2, 0.4, 0.6), 0.3);
     }
 
@@ -458,6 +495,13 @@ const FS_SOURCE = `
     if (abs(n.y) < 0.1) ao = 0.80;
     else if (n.y < -0.5) ao = 0.60;
     color *= ao;
+
+    // 深度暗化：低于海平面的方块逐渐变暗（模拟洞穴/水下光照减弱）
+    float depthDark = 1.0;
+    if (vWorldPos.y < 26.0) {
+      depthDark = clamp(vWorldPos.y / 26.0 * 1.5 + 0.15, 0.15, 1.0);
+    }
+    color *= depthDark;
 
     // 雾
     vec3 fogColor = uFogColor;
@@ -526,10 +570,15 @@ function createTextureAtlas(gl) {
         let subCanvas = ctx.canvas;
         // 程序化纹理
         let rng = (x,y) => { let n = Math.sin(x*12.9898 + y*78.233 + bt*37) * 43758.5453; return n - Math.floor(n); };
+        let rng2 = (x,y) => { let n = Math.sin(x*94.31 + y*17.55 + bt*91) * 12583.7; return n - Math.floor(n); };
+        let rng3 = (x,y) => { let n = Math.sin(x*53.7 + y*158.2 + bt*55) * 73121.3; return n - Math.floor(n); };
         for (let x = 0; x < size; x++) {
           for (let y = 0; y < size; y++) {
-            let noise = rng(x + col2 * 17, y + row2 * 23);
-            let v = (noise - 0.5) * 25;
+            // FBM: 3 层噪声叠加（大、中、细）
+            let n1 = rng(x + col2 * 17, y + row2 * 23) - 0.5;
+            let n2 = (rng2(x, y) - 0.5) * 0.5;
+            let n3 = (rng3(x, y) - 0.5) * 0.25;
+            let v = (n1 + n2 + n3) * 28;
             let pr = Math.max(0, Math.min(255, r + v));
             let pg = Math.max(0, Math.min(255, g + v));
             let pb = Math.max(0, Math.min(255, b + v));
@@ -848,12 +897,20 @@ class Renderer {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     // 构建视图矩阵（lookAt，约定：yaw=0 朝 -Z，pitch 正=仰视看天上）
-    let eyeX = player.x, eyeY = player.y + player.eyeHeight, eyeZ = player.z;
+    let camDist = 0;
+    let camHeight = player.eyeHeight;
+    if (player.thirdPerson) { camDist = 5.5; camHeight = player.eyeHeight + 0.8; }
     let cp = Math.cos(player.pitch), sp = Math.sin(player.pitch);
     let cy = Math.cos(player.yaw), sy = Math.sin(player.yaw);
     let fwdX = -sy * cp, fwdY = sp, fwdZ = -cy * cp;
+    // 第三人称：摄像机沿 -forward 方向后退
+    let eyeX = player.x - fwdX * camDist;
+    let eyeY = player.y + camHeight - fwdY * camDist;
+    let eyeZ = player.z - fwdZ * camDist;
+    // 第三人称目标点 = 玩家眼睛位置（而非摄像机 + forward）
+    let centerX = player.x, centerY = player.y + player.eyeHeight, centerZ = player.z;
+    if (!player.thirdPerson) { centerX = eyeX + fwdX; centerY = eyeY + fwdY; centerZ = eyeZ + fwdZ; }
     // 右手系 right = forward × up = (cy, 0, -sy)  (yaw 方向上的水平右向)
-    // 用 right 替代 up 的 y 分量：当俯仰接近垂直时保证矩阵不退化
     let rightX = cy, rightY = 0, rightZ = -sy;
     // 真正的 up = right × forward（保证正交且不与 forward 平行）
     let upX = rightY * fwdZ - rightZ * fwdY;
@@ -861,7 +918,7 @@ class Renderer {
     let upZ = rightX * fwdY - rightY * fwdX;
     mat4.lookAt(this.viewMatrix,
       [eyeX, eyeY, eyeZ],
-      [eyeX + fwdX, eyeY + fwdY, eyeZ + fwdZ],
+      [centerX, centerY, centerZ],
       [upX, upY, upZ]
     );
 
@@ -924,31 +981,63 @@ class Renderer {
       this.selBox = null;
     }
 
+    // 云朵层
+    this.drawClouds(player, time);
+
+    // 第三人称时画玩家模型
+    if (player.thirdPerson) {
+      this.drawPlayerModel(player);
+    }
+
     return { renderedChunks, blockCount };
   }
 
-  // 画选中方块的线框
+  // 画选中方块的线框（用 12 个细矩形条带模拟黑边，TRIANGLES 比 LINES 兼容性好）
   drawSelection(pos) {
     let gl = this.gl;
+    let E = 0.03; // 边框厚度
     if (!this.selBuf) {
-      // 初始化线框缓冲（一个单位立方体的 12 条边 = 24 个顶点）
-      let verts = [];
-      let e = [
-        [0,0,0],[1,0,0], [1,0,0],[1,0,1], [1,0,1],[0,0,1], [0,0,1],[0,0,0], // 底
-        [0,1,0],[1,1,0], [1,1,0],[1,1,1], [1,1,1],[0,1,1], [0,1,1],[0,1,0], // 顶
-        [0,0,0],[0,1,0], [1,0,0],[1,1,0], [1,0,1],[1,1,1], [0,0,1],[0,1,1], // 竖
+      // 生成 12 条边的矩形几何（每条边 = 2 个三角形 = 6 顶点，12 条边 = 72 顶点）
+      // 每条边由两个端点 p1, p2 定义，矩形垂直于这条边
+      let edges = [
+        // 底面4条
+        [[0,0,0],[1,0,0]], [[1,0,0],[1,0,1]], [[1,0,1],[0,0,1]], [[0,0,1],[0,0,0]],
+        // 顶面4条
+        [[0,1,0],[1,1,0]], [[1,1,0],[1,1,1]], [[1,1,1],[0,1,1]], [[0,1,1],[0,1,0]],
+        // 竖4条
+        [[0,0,0],[0,1,0]], [[1,0,0],[1,1,0]], [[1,0,1],[1,1,1]], [[0,0,1],[0,1,1]],
       ];
-      for (let i = 0; i < e.length; i++) verts.push(e[i][0], e[i][1], e[i][2]);
+      let verts = [];
+      function addQuad(a, b, c, d) {
+        verts.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2],
+                   a[0],a[1],a[2], c[0],c[1],c[2], d[0],d[1],d[2]);
+      }
+      for (let [p1, p2] of edges) {
+        // 判断边方向
+        let dx = p2[0]-p1[0], dy = p2[1]-p1[1], dz = p2[2]-p1[2];
+        if (dx !== 0) {
+          // X方向边：在 Y 和 Z 方向扩展厚度
+          addQuad([p1[0],p1[1]-E,p1[2]-E],[p1[0],p1[1]+E,p1[2]-E],[p2[0],p2[1]+E,p2[2]-E],[p2[0],p2[1]-E,p2[2]-E]);
+          addQuad([p1[0],p1[1]-E,p1[2]+E],[p1[0],p1[1]+E,p1[2]+E],[p2[0],p2[1]+E,p2[2]+E],[p2[0],p2[1]-E,p2[2]+E]);
+        } else if (dy !== 0) {
+          // Y方向边
+          addQuad([p1[0]-E,p1[1],p1[2]-E],[p1[0]+E,p1[1],p1[2]-E],[p2[0]+E,p2[1],p2[2]-E],[p2[0]-E,p2[1],p2[2]-E]);
+          addQuad([p1[0]-E,p1[1],p1[2]+E],[p1[0]+E,p1[1],p1[2]+E],[p2[0]+E,p2[1],p2[2]+E],[p2[0]-E,p2[1],p2[2]+E]);
+        } else {
+          // Z方向边
+          addQuad([p1[0]-E,p1[1]-E,p1[2]],[p1[0]+E,p1[1]-E,p1[2]],[p2[0]+E,p2[1]-E,p2[2]],[p2[0]-E,p2[1]-E,p2[2]]);
+          addQuad([p1[0]-E,p1[1]+E,p1[2]],[p1[0]+E,p1[1]+E,p1[2]],[p2[0]+E,p2[1]+E,p2[2]],[p2[0]-E,p2[1]+E,p2[2]]);
+        }
+      }
       this.selBuf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, this.selBuf);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
-      // 简单线框 shader
-      let vs = `attribute vec3 aPos; uniform mat4 uProj; uniform mat4 uView; uniform vec3 uOffset; void main(){ vec4 p = uProj * uView * vec4(aPos + uOffset + vec3(0.002), 1.0); gl_Position = p; }`;
-      let fs = `precision mediump float; void main(){ gl_FragColor = vec4(0.0, 0.0, 0.0, 0.5); }`;
-      let s1 = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(s1, vs); gl.compileShader(s1);
-      let s2 = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(s2, fs); gl.compileShader(s2);
-      this.selProg = gl.createProgram();
-      gl.attachShader(this.selProg, s1); gl.attachShader(this.selProg, s2); gl.linkProgram(this.selProg);
+      this.selVertCount = verts.length / 3;
+      let vs = `attribute vec3 aPos; uniform mat4 uProj; uniform mat4 uView; uniform vec3 uOffset; void main(){ vec4 p = uProj * uView * vec4(aPos + uOffset, 1.0); gl_Position = p; }`;
+      let fs = `precision mediump float; void main(){ gl_FragColor = vec4(0.0, 0.0, 0.0, 0.4); }`;
+      let s1 = compileShader(gl, vs, gl.VERTEX_SHADER);
+      let s2 = compileShader(gl, fs, gl.FRAGMENT_SHADER);
+      this.selProg = linkProgram(gl, s1, s2);
       this.selLoc = {
         aPos: gl.getAttribLocation(this.selProg, 'aPos'),
         uProj: gl.getUniformLocation(this.selProg, 'uProj'),
@@ -965,8 +1054,227 @@ class Renderer {
     gl.vertexAttribPointer(this.selLoc.aPos, 3, gl.FLOAT, false, 0, 0);
     gl.enable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
-    gl.drawArrays(gl.LINES, 0, 24);
+    gl.drawArrays(gl.TRIANGLES, 0, this.selVertCount);
     gl.enable(gl.DEPTH_TEST);
+  }
+
+  // 画云朵层（在 y=CLOUD_Y 处的半透明白色平面，用噪声决定密度）
+  drawClouds(player, time) {
+    let gl = this.gl;
+    let CLOUD_Y = 48;
+    let CLOUD_RANGE = 60;  // 云层在玩家周围 60 格范围
+    if (!this.cloudBuf) {
+      // 生成一块 16x16 的云纹理
+      let cs = 64;
+      let canvas = document.createElement("canvas");
+      canvas.width = canvas.height = cs;
+      let ctx = canvas.getContext("2d");
+      ctx.fillStyle = "rgba(0,0,0,0)";
+      ctx.fillRect(0, 0, cs, cs);
+      // FBM 噪声生成云形状
+      let rng = (x, y) => { let n = Math.sin(x*12.9898 + y*78.233) * 43758.5453; return n - Math.floor(n); };
+      let img = ctx.createImageData(cs, cs);
+      for (let y = 0; y < cs; y++) {
+        for (let x = 0; x < cs; x++) {
+          let n1 = rng(x * 0.5, y * 0.5);
+          let n2 = rng(x * 0.15 + 100, y * 0.15 + 100) * 0.5;
+          let n3 = rng(x * 0.06 + 200, y * 0.06 + 200) * 0.25;
+          let v = n1 + n2 + n3;
+          let alpha = v > 0.65 ? Math.min(200, (v - 0.65) * 600) : 0;
+          let idx = (y * cs + x) * 4;
+          img.data[idx] = 255; img.data[idx+1] = 255; img.data[idx+2] = 255;
+          img.data[idx+3] = alpha;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      this.cloudTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this.cloudTex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+
+      // 一块大平面的顶点（覆盖 -CLOUD_RANGE 到 +CLOUD_RANGE）
+      let R = CLOUD_RANGE;
+      let verts = [
+        -R, 0, -R,  0, 0,
+         R, 0, -R,  16, 0,
+         R, 0,  R,  16, 16,
+        -R, 0, -R,  0, 0,
+         R, 0,  R,  16, 16,
+        -R, 0,  R,  0, 16,
+      ];
+      this.cloudVertCount = 6;
+      this.cloudBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.cloudBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+
+      // 云 shader
+      let vs = `
+        attribute vec3 aPos; attribute vec2 aUV;
+        uniform mat4 uProj; uniform mat4 uView; uniform vec3 uOffset; uniform float uTime;
+        varying vec2 vUV; varying float vDist;
+        void main() {
+          vec3 p = aPos + uOffset;
+          gl_Position = uProj * uView * vec4(p, 1.0);
+          vUV = aUV + vec2(uTime * 0.005, uTime * 0.003);
+          vDist = length(gl_Position.xyz);
+        }`;
+      let fs = `
+        precision mediump float; varying vec2 vUV; varying float vDist;
+        uniform sampler2D uTex;
+        void main() {
+          vec4 c = texture2D(uTex, vUV);
+          if (c.a < 0.01) discard;
+          float fog = clamp((vDist - 80.0) / 40.0, 0.0, 0.5);
+          c.a *= (1.0 - fog);
+          gl_FragColor = c;
+        }`;
+      let s1 = compileShader(gl, vs, gl.VERTEX_SHADER);
+      let s2 = compileShader(gl, fs, gl.FRAGMENT_SHADER);
+      this.cloudProg = linkProgram(gl, s1, s2);
+      this.cloudLoc = {
+        aPos: gl.getAttribLocation(this.cloudProg, 'aPos'),
+        aUV: gl.getAttribLocation(this.cloudProg, 'aUV'),
+        uProj: gl.getUniformLocation(this.cloudProg, 'uProj'),
+        uView: gl.getUniformLocation(this.cloudProg, 'uView'),
+        uOffset: gl.getUniformLocation(this.cloudProg, 'uOffset'),
+        uTime: gl.getUniformLocation(this.cloudProg, 'uTime'),
+        uTex: gl.getUniformLocation(this.cloudProg, 'uTex'),
+      };
+    }
+    gl.useProgram(this.cloudProg);
+    gl.uniformMatrix4fv(this.cloudLoc.uProj, false, this.projMatrix);
+    gl.uniformMatrix4fv(this.cloudLoc.uView, false, this.viewMatrix);
+    // 云层跟随玩家（x,z），y 固定
+    gl.uniform3f(this.cloudLoc.uOffset, player.x, CLOUD_Y, player.z);
+    gl.uniform1f(this.cloudLoc.uTime, time);
+    gl.uniform1i(this.cloudLoc.uTex, 1);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.cloudTex);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.cloudBuf);
+    let stride = 5 * 4;
+    gl.enableVertexAttribArray(this.cloudLoc.aPos);
+    gl.vertexAttribPointer(this.cloudLoc.aPos, 3, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(this.cloudLoc.aUV);
+    gl.vertexAttribPointer(this.cloudLoc.aUV, 2, gl.FLOAT, false, stride, 3 * 4);
+
+    gl.enable(gl.BLEND);
+    gl.depthMask(false);
+    gl.drawArrays(gl.TRIANGLES, 0, this.cloudVertCount);
+    gl.depthMask(true);
+  }
+
+  // 画玩家模型（简单的方块人：头、身体、双臂、双腿）
+  drawPlayerModel(player) {
+    let gl = this.gl;
+    if (!this.playerBuf) {
+      // 玩家模型用 6 个 box 组成（头 0.5x0.5x0.5, 身体 0.6x0.9x0.3, 臂 0.25x0.8x0.25 x2, 腿 0.25x0.9x0.25 x2）
+      // 每个 box = 6 面 = 12 三角形 = 36 顶点
+      function boxMesh(ox, oy, oz, sx, sy, sz, r, g, b) {
+        let v = [];
+        function face(f) {
+          let [x0,y0,z0,x1,y1,z1] = f;
+          // 4 corners
+          let p = [[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0]];
+          // 复用 FACES 定义简化
+        }
+        // 直接写 6 面的三角形
+        let x0=ox, y0=oy, z0=oz, x1=ox+sx, y1=oy+sy, z1=oz+sz;
+        function addQuad(a,b,c) { v.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]); }
+        // 用法线作为 extra 数据没用（这里颜色就够了），简化：6 面每面 2 三角形
+        // top (y=y1)
+        addQuad([x0,y1,z0],[x1,y1,z1],[x1,y1,z0]); addQuad([x0,y1,z0],[x0,y1,z1],[x1,y1,z1]);
+        // bottom (y=y0)
+        addQuad([x0,y0,z0],[x1,y0,z0],[x1,y0,z1]); addQuad([x0,y0,z0],[x1,y0,z1],[x0,y0,z1]);
+        // -z (z=z0)
+        addQuad([x0,y0,z0],[x0,y1,z1-0],[x0,y1,z0]); addQuad([x0,y0,z0],[x0,y0,z1],[x0,y1,z1]);
+        // +z (z=z1)
+        // 嗯这方法太啰嗦了，改用索引方式
+        return null;
+      }
+      // 更简洁：直接定义一个 generateBox 返回 {positions, indices}
+      function genBox(ox, oy, oz, sx, sy, sz) {
+        let x0=ox, y0=oy, z0=oz, x1=ox+sx, y1=oy+sy, z1=oz+sz;
+        let positions = [
+          x0,y1,z1, x1,y1,z1, x1,y1,z0, x0,y1,z0,  // top
+          x0,y0,z0, x1,y0,z0, x1,y0,z1, x0,y0,z1,  // bottom
+          x0,y0,z1, x1,y0,z1, x1,y1,z1, x0,y1,z1,  // +z
+          x1,y0,z0, x0,y0,z0, x0,y1,z0, x1,y1,z0,  // -z
+          x1,y0,z1, x1,y0,z0, x1,y1,z0, x1,y1,z1,  // +x
+          x0,y0,z0, x0,y0,z1, x0,y1,z1, x0,y1,z0,  // -x
+        ];
+        let indices = [];
+        for (let i = 0; i < 6; i++) {
+          let b = i * 4;
+          indices.push(b, b+1, b+2, b, b+2, b+3);
+        }
+        return {positions, indices};
+      }
+      let allPos = [], allIdx = [];
+      let offset = 0;
+      function addBox(ox, oy, oz, sx, sy, sz) {
+        let b = genBox(ox, oy, oz, sx, sy, sz);
+        allPos.push(...b.positions);
+        for (let i of b.indices) allIdx.push(i + offset);
+        offset += 4 * 6;
+      }
+      // 模型（相对玩家中心 x=0.5, z=0.5, y=0 在脚下）
+      // 头：0.5x0.5x0.5，在 y=1.5 居中
+      addBox(0.25, 1.5, 0.25, 0.5, 0.5, 0.5);
+      // 身体：0.6x0.9x0.3，y=0.6~1.5
+      addBox(0.2, 0.6, 0.35, 0.6, 0.9, 0.3);
+      // 左臂：0.25x0.8x0.25，x=0~0.25, y=0.7~1.5
+      addBox(-0.05, 0.7, 0.375, 0.25, 0.8, 0.25);
+      // 右臂：0.25x0.8x0.25，x=0.75~1.0
+      addBox(0.8, 0.7, 0.375, 0.25, 0.8, 0.25);
+      // 左腿：0.25x0.6x0.25，x=0.25~0.5
+      addBox(0.25, 0, 0.375, 0.25, 0.6, 0.25);
+      // 右腿：0.25x0.6x0.25，x=0.5~0.75
+      addBox(0.5, 0, 0.375, 0.25, 0.6, 0.25);
+
+      this.playerPosBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.playerPosBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(allPos), gl.STATIC_DRAW);
+      this.playerIdxBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.playerIdxBuf);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(allIdx), gl.STATIC_DRAW);
+      this.playerIdxCount = allIdx.length;
+
+      // 玩家 shader（单色，不走纹理）
+      let vs = `
+        attribute vec3 aPos; uniform mat4 uProj; uniform mat4 uView; uniform vec3 uOffset; uniform vec3 uColor;
+        varying vec3 vColor;
+        void main() { vColor = uColor; gl_Position = uProj * uView * vec4(aPos + uOffset, 1.0); }`;
+      let fs = `precision mediump float; varying vec3 vColor; void main() { gl_FragColor = vec4(vColor, 1.0); }`;
+      let s1 = compileShader(gl, vs, gl.VERTEX_SHADER);
+      let s2 = compileShader(gl, fs, gl.FRAGMENT_SHADER);
+      this.playerProg = linkProgram(gl, s1, s2);
+      this.playerLoc = {
+        aPos: gl.getAttribLocation(this.playerProg, 'aPos'),
+        uProj: gl.getUniformLocation(this.playerProg, 'uProj'),
+        uView: gl.getUniformLocation(this.playerProg, 'uView'),
+        uOffset: gl.getUniformLocation(this.playerProg, 'uOffset'),
+        uColor: gl.getUniformLocation(this.playerProg, 'uColor'),
+      };
+    }
+    gl.useProgram(this.playerProg);
+    gl.uniformMatrix4fv(this.playerLoc.uProj, false, this.projMatrix);
+    gl.uniformMatrix4fv(this.playerLoc.uView, false, this.viewMatrix);
+    // 偏移到玩家位置（模型坐标 x,z 在 0~1，玩家中心在 0.5 所以 offset 减 0.5）
+    gl.uniform3f(this.playerLoc.uOffset, player.x - 0.5, player.y, player.z - 0.5);
+    // 整体用一个蓝灰色（先整模型上色，后续可分部位上色）
+    gl.uniform3f(this.playerLoc.uColor, 0.3, 0.5, 0.8);  // 蓝色衣服
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.playerPosBuf);
+    gl.enableVertexAttribArray(this.playerLoc.aPos);
+    gl.vertexAttribPointer(this.playerLoc.aPos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.playerIdxBuf);
+    gl.disable(gl.BLEND);
+    gl.enable(gl.DEPTH_TEST);
+    gl.drawElements(gl.TRIANGLES, this.playerIdxCount, gl.UNSIGNED_SHORT, 0);
   }
 }
 
@@ -988,6 +1296,7 @@ class Player {
     this.speed = 4.5;
     this.flySpeed = 8;
     this.flying = false;
+    this.thirdPerson = false;
     this.health = 20;
     this.fallDistance = 0;
   }
@@ -1210,6 +1519,8 @@ const Game = {
     this.paused = false;
     this.dead = false;
     this.mouseLocked = false;
+    this.mouseSensitivity = 0.0025;
+    this.cameraMode = "first";  // "first" | "third"
     this.breakingBlock = null;
     this.breakingProgress = 0;
     this.placeCooldown = 0;
@@ -1370,6 +1681,10 @@ const Game = {
       if (e.code === "ShiftLeft") this.input.shift = true;
       if (e.code === "Escape") this.togglePause();
       if (e.code === "KeyF") this.player.flying = !this.player.flying;
+      if (e.code === "KeyV") this.toggleCameraMode();
+      // 鼠标灵敏度调节（[ 降，] 升）
+      if (e.code === "BracketLeft") { this.mouseSensitivity = Math.max(0.0005, this.mouseSensitivity * 0.8); console.log("sens=" + this.mouseSensitivity.toFixed(4)); }
+      if (e.code === "BracketRight") { this.mouseSensitivity = Math.min(0.01, this.mouseSensitivity * 1.25); console.log("sens=" + this.mouseSensitivity.toFixed(4)); }
       // 数字键选择物品栏
       if (e.code >= "Digit1" && e.code <= "Digit9") {
         this.selectSlot(parseInt(e.code.slice(-1)) - 1);
@@ -1393,8 +1708,9 @@ const Game = {
     });
     document.addEventListener("mousemove", (e) => {
       if (!this.mouseLocked || this.paused || this.dead) return;
-      this.player.yaw -= e.movementX * 0.0025;
-      this.player.pitch -= e.movementY * 0.0025; // 鼠标下推→俯视→pitch 减（约定 pitch 正=仰视）
+      let sens = this.mouseSensitivity || 0.0025;
+      this.player.yaw -= e.movementX * sens;
+      this.player.pitch -= e.movementY * sens; // 鼠标下推→俯视→pitch 减（约定 pitch 正=仰视）
       this.player.pitch = Math.max(-Math.PI/2 + 0.01, Math.min(Math.PI/2 - 0.01, this.player.pitch));
       // 保持 yaw 在 0~2π
       if (this.player.yaw < 0) this.player.yaw += Math.PI * 2;
@@ -1459,6 +1775,12 @@ const Game = {
     let b = this.world.getBlock(hit.x, hit.y, hit.z);
     if (b === BLOCK.BEDROCK) return;
     this.world.setBlock(hit.x, hit.y, hit.z, BLOCK.AIR);
+  },
+
+  toggleCameraMode() {
+    this.cameraMode = this.cameraMode === "first" ? "third" : "first";
+    this.player.thirdPerson = (this.cameraMode === "third");
+    console.log("camera: " + this.cameraMode);
   },
 
   togglePause() {
