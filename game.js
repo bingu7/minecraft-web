@@ -888,9 +888,13 @@ class Renderer {
     let eyeX = player.x - fwdX * camDist;
     let eyeY = player.y + camHeight - fwdY * camDist;
     let eyeZ = player.z - fwdZ * camDist;
-    // 第三人称目标点 = 玩家眼睛位置（而非摄像机 + forward）
-    let centerX = player.x, centerY = player.y + player.eyeHeight, centerZ = player.z;
-    if (!player.thirdPerson) { centerX = eyeX + fwdX; centerY = eyeY + fwdY; centerZ = eyeZ + fwdZ; }
+    // 第一人称：看向摄像机前方；第三人称：看向玩家身体（能看到模型）
+    let centerX, centerY, centerZ;
+    if (player.thirdPerson) {
+      centerX = player.x; centerY = player.y + 0.8; centerZ = player.z;
+    } else {
+      centerX = eyeX + fwdX; centerY = eyeY + fwdY; centerZ = eyeZ + fwdZ;
+    }
     // 右手系 right = forward × up = (cy, 0, -sy)  (yaw 方向上的水平右向)
     let rightX = cy, rightY = 0, rightZ = -sy;
     // 真正的 up = right × forward（保证正交且不与 forward 平行）
@@ -1149,6 +1153,7 @@ class Renderer {
   // 画玩家模型（简单的方块人：头、身体、双臂、双腿）
   drawPlayerModel(player) {
     let gl = this.gl;
+    this._playerDrawCount = (this._playerDrawCount || 0) + 1;
     if (!this.playerPosBuf) {
       // genBox: 返回 {positions, normals, indices}，每个 box 6 面 24 顶点
       function genBox(ox, oy, oz, sx, sy, sz) {
@@ -1234,14 +1239,16 @@ class Renderer {
       gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(allIdx), gl.STATIC_DRAW);
       this.playerIdxCount = allIdx.length;
 
-      // 带 directional 光照的 shader
+      // 带 directional 光照 + 模型旋转的 shader
       let vs = `
         attribute vec3 aPos; attribute vec3 aNormal; attribute vec4 aColor;
-        uniform mat4 uProj; uniform mat4 uView; uniform vec3 uOffset;
+        uniform mat4 uProj; uniform mat4 uView; uniform mat4 uModel;
         varying vec3 vNormal; varying vec4 vColor;
         void main() {
-          gl_Position = uProj * uView * vec4(aPos + uOffset, 1.0);
-          vNormal = aNormal; vColor = aColor;
+          gl_Position = uProj * uView * uModel * vec4(aPos, 1.0);
+          // 法线用旋转部分（忽略平移），简单起见直接传 uModel 的上 3x3
+          vNormal = mat3(uModel) * aNormal;
+          vColor = aColor;
         }`;
       let fs = `
         precision mediump float;
@@ -1268,14 +1275,21 @@ class Renderer {
         aColor: gl.getAttribLocation(this.playerProg, 'aColor'),
         uProj: gl.getUniformLocation(this.playerProg, 'uProj'),
         uView: gl.getUniformLocation(this.playerProg, 'uView'),
-        uOffset: gl.getUniformLocation(this.playerProg, 'uOffset'),
+        uModel: gl.getUniformLocation(this.playerProg, 'uModel'),
         uSunDir: gl.getUniformLocation(this.playerProg, 'uSunDir'),
       };
     }
     gl.useProgram(this.playerProg);
     gl.uniformMatrix4fv(this.playerLoc.uProj, false, this.projMatrix);
     gl.uniformMatrix4fv(this.playerLoc.uView, false, this.viewMatrix);
-    gl.uniform3f(this.playerLoc.uOffset, player.x - 0.5, player.y, player.z - 0.5);
+    // 模型矩阵：先平移到玩家位置，再绕脚下中心旋转 facingY
+    // 旋转中心 = 模型坐标 (0.5, 0, 0.5)
+    let m = mat4.identity(mat4.create());
+    mat4.translate(m, m, [player.x, player.y, player.z]);
+    mat4.translate(m, m, [0.5, 0, 0.5]);
+    mat4.rotateY(m, m, player.facingY);
+    mat4.translate(m, m, [-0.5, 0, -0.5]);
+    gl.uniformMatrix4fv(this.playerLoc.uModel, false, m);
     // 光照方向（和主 renderer 同步）
     let gameTime = (performance.now() - Game.startTime) / 1000;
     let dayCycle = (gameTime / 300) % 1.0;
@@ -1309,6 +1323,7 @@ class Player {
     this.x = 8; this.y = 40; this.z = 8;
     this.vx = 0; this.vy = 0; this.vz = 0;
     this.yaw = 0; this.pitch = 0;
+    this.facingY = 0;  // 模型面向角（移动时更新，rad），yaw=0 朝 -Z
     this.onGround = false;
     this.inWater = false;
     this.width = 0.6;
@@ -1436,6 +1451,19 @@ class Player {
     if (collidedX) this.vx = 0;
     if (collidedZ) this.vz = 0;
     if (collidedY && !this.flying) this.vy = 0;
+
+    // 更新模型面向：有水平移动时朝向移动方向
+    let hSpeed = Math.sqrt(this.vx * this.vx + this.vz * this.vz);
+    if (hSpeed > 0.001) {
+      // atan2(-vx, -vz)：yaw=0 朝 -Z，移动 -Z 时 facingY=0
+      // 5 帧平滑插值避免抖动
+      let target = Math.atan2(-this.vx, -this.vz);
+      // 角度差归一化到 -pi~pi
+      let diff = target - this.facingY;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      this.facingY += diff * Math.min(1, dt * 15);
+    }
 
     // 掉出世界
     if (this.y < -10) {
