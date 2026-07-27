@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我的世界 - 网页版</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #000; }
+  canvas { display: block; }
+
+  /* 加载界面 */
+  #loading {
+    position: fixed; inset: 0; background: #1a1a2e; color: #eee;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 1000; transition: opacity 0.5s;
+  }
+  #loading h1 { font-size: 48px; margin-bottom: 20px; text-shadow: 2px 2px 4px #000; }
+  #loading p { font-size: 16px; color: #aaa; margin-top: 10px; }
+  .loading-bar { width: 300px; height: 20px; background: #333; border-radius: 10px; overflow: hidden; margin-top: 20px; }
+  .loading-bar div { height: 100%; background: linear-gradient(90deg, #4CAF50, #81C784); transition: width 0.3s; }
+
+  /* HUD */
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+  #crosshair {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 20px; height: 20px;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: rgba(255,255,255,0.8); mix-blend-mode: difference;
+  }
+  #crosshair::before { width: 2px; height: 20px; left: 9px; }
+  #crosshair::after { width: 20px; height: 2px; top: 9px; }
+
+  #info {
+    position: absolute; top: 10px; left: 10px;
+    color: #fff; font-size: 13px; text-shadow: 1px 1px 2px #000;
+    background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: 6px;
+    line-height: 1.6;
+  }
+  #info b { color: #8BC34A; }
+
+  /* 物品栏 */
+  #hotbar {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 4px; background: rgba(0,0,0,0.5); padding: 4px;
+    border-radius: 4px;
+  }
+  .slot {
+    width: 56px; height: 56px; border: 2px solid rgba(255,255,255,0.2);
+    border-radius: 4px; display: flex; align-items: center; justify-content: center;
+    position: relative; background: rgba(50,50,50,0.6);
+  }
+  .slot.active { border-color: #fff; background: rgba(100,100,100,0.6); }
+  .slot canvas { width: 40px; height: 40px; image-rendering: pixelated; }
+  .slot .num { position: absolute; top: 1px; left: 3px; color: #fff; font-size: 10px; text-shadow: 1px 1px 1px #000; }
+  .slot .name { position: absolute; bottom: -22px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 12px; text-shadow: 1px 1px 2px #000; white-space: nowrap; opacity: 0; transition: opacity 0.2s; }
+  .slot.active .name { opacity: 1; }
+
+  /* 准心提示 */
+  #break-progress {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 24px; height: 24px; pointer-events: none;
+  }
+
+  /* 暂停/菜单 */
+  #pause-menu {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    display: none; align-items: center; justify-content: center; z-index: 100;
+    flex-direction: column; color: #fff;
+  }
+  #pause-menu h2 { font-size: 36px; margin-bottom: 30px; }
+  #pause-menu .btn {
+    padding: 12px 40px; margin: 8px; font-size: 16px; cursor: pointer;
+    background: #4CAF50; color: #fff; border: none; border-radius: 4px;
+    transition: background 0.2s;
+  }
+  #pause-menu .btn:hover { background: #66BB6A; }
+  #pause-menu .btn.secondary { background: #555; }
+  #pause-menu .btn.secondary:hover { background: #777; }
+  #pause-menu .hint { margin-top: 20px; color: #aaa; font-size: 14px; }
+
+  /* FPS显示 */
+  #fps {
+    position: absolute; top: 10px; right: 10px;
+    color: #fff; font-size: 13px; text-shadow: 1px 1px 2px #000;
+    background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: 6px;
+  }
+
+  /* 受伤红屏 */
+  #damage-overlay {
+    position: fixed; inset: 0; pointer-events: none; z-index: 50;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(180,0,0,0.5) 100%);
+    opacity: 0; transition: opacity 0.15s;
+  }
+
+  /* 手部模型 */
+  #hand-container {
+    position: absolute; bottom: 0; right: 20%;
+    width: 200px; height: 200px; pointer-events: none;
+    transition: transform 0.15s;
+  }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <h1>⛏️ 我的世界</h1>
+  <div class="loading-bar"><div id="loading-bar" style="width:0%"></div></div>
+  <p id="loading-text">正在生成世界...</p>
+</div>
+
+<div id="hud">
+  <div id="crosshair"></div>
+  <div id="break-progress"></div>
+  <div id="info">
+    <b>FPS:</b> <span id="fps-val">0</span> | <b>XYZ:</b> <span id="coords">0, 0, 0</span><br>
+    <b>区块:</b> <span id="chunk-info">0 / 0</span> | <b>方块:</b> <span id="block-count">0</span><br>
+    <b>朝向:</b> <span id="facing">南</span>
+  </div>
+  <div id="fps"></div>
+  <div id="hotbar"></div>
+</div>
+
+<div id="damage-overlay"></div>
+
+<div id="hand-container"><canvas id="hand-canvas" width="200" height="200"></canvas></div>
+
+<div id="pause-menu">
+  <h2>游戏暂停</h2>
+  <button class="btn" onclick="Game.resume()">继续游戏</button>
+  <button class="btn secondary" onclick="Game.respawn()">重生</button>
+  <button class="btn secondary" onclick="Game.save()">保存世界</button>
+  <div class="hint">按 ESC 继续 | WASD 移动 | 空格跳跃 | 鼠标左键破坏 | 右键放置 | 滚轮/1-9 切换方块</div>
+</div>
+
+<div id="death-screen" style="position:fixed;inset:0;background:rgba(60,0,0,0.7);display:none;align-items:center;justify-content:center;z-index:200;flex-direction:column;color:#fff;">
+  <h2 style="font-size:42px;color:#ff4444;margin-bottom:10px;">你死了！</h2>
+  <p style="margin-bottom:30px;color:#ccc;">生命值耗尽，被终究是要回家的</p>
+  <button class="btn" style="padding:14px 50px;font-size:18px;cursor:pointer;background:#c0392b;color:#fff;border:none;border-radius:6px;" onclick="Game.respawn()">重生</button>
+</div>
+
+<div id="hud-overlay">
+  <div id="health-bar" style="position:absolute;bottom:90px;left:50%;transform:translateX(-50%);display:flex;gap:2px;"></div>
+</div>
+
+<canvas id="glcanvas"></canvas>
+
+<script src="game.js"></script>
+</body>
+</html>
