@@ -439,12 +439,13 @@ const FS_SOURCE = `
     vec3 skyLight = vec3(0.4, 0.55, 0.7) * 0.3 * (1.0 - max(dot(n, vec3(0.0,1.0,0.0)), 0.0));
 
     vec4 texColor = texture2D(uTex, vUV);
-    vec4 baseColor = vColor;
-    float alpha = baseColor.a;
+    // 纹理色 × 顶点色调（顶点色提供面方向色彩差异）
+    vec3 baseRGB = texColor.rgb * vColor.rgb;
+    float alpha = texColor.a * vColor.a;
     // 完全透明（接近空气）才 discard，半透明走 blend
     if (alpha < 0.05) discard;
 
-    vec3 color = baseColor.rgb * bright + skyLight * baseColor.rgb;
+    vec3 color = baseRGB * bright + skyLight * baseRGB;
 
     if (uIsWater) {
       float wave = sin(vWorldPos.x * 2.0 + uTime * 1.5) * cos(vWorldPos.z * 2.0 + uTime * 1.2) * 0.1;
@@ -452,9 +453,10 @@ const FS_SOURCE = `
       color = mix(color, vec3(0.2, 0.4, 0.6), 0.3);
     }
 
-    // 简单 AO（基于法线与垂直方向的夹角）
+    // 简单 AO（顶面最亮，侧面偏暗，底面最暗）
     float ao = 1.0;
-    if (abs(n.y) < 0.1) ao = 0.85;
+    if (abs(n.y) < 0.1) ao = 0.80;
+    else if (n.y < -0.5) ao = 0.60;
     color *= ao;
 
     // 雾
@@ -916,7 +918,55 @@ class Renderer {
     }
     gl.depthMask(true);
 
+    // 选中方块高亮线框
+    if (this.selBox) {
+      this.drawSelection(this.selBox);
+      this.selBox = null;
+    }
+
     return { renderedChunks, blockCount };
+  }
+
+  // 画选中方块的线框
+  drawSelection(pos) {
+    let gl = this.gl;
+    if (!this.selBuf) {
+      // 初始化线框缓冲（一个单位立方体的 12 条边 = 24 个顶点）
+      let verts = [];
+      let e = [
+        [0,0,0],[1,0,0], [1,0,0],[1,0,1], [1,0,1],[0,0,1], [0,0,1],[0,0,0], // 底
+        [0,1,0],[1,1,0], [1,1,0],[1,1,1], [1,1,1],[0,1,1], [0,1,1],[0,1,0], // 顶
+        [0,0,0],[0,1,0], [1,0,0],[1,1,0], [1,0,1],[1,1,1], [0,0,1],[0,1,1], // 竖
+      ];
+      for (let i = 0; i < e.length; i++) verts.push(e[i][0], e[i][1], e[i][2]);
+      this.selBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.selBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+      // 简单线框 shader
+      let vs = `attribute vec3 aPos; uniform mat4 uProj; uniform mat4 uView; uniform vec3 uOffset; void main(){ vec4 p = uProj * uView * vec4(aPos + uOffset + vec3(0.002), 1.0); gl_Position = p; }`;
+      let fs = `precision mediump float; void main(){ gl_FragColor = vec4(0.0, 0.0, 0.0, 0.5); }`;
+      let s1 = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(s1, vs); gl.compileShader(s1);
+      let s2 = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(s2, fs); gl.compileShader(s2);
+      this.selProg = gl.createProgram();
+      gl.attachShader(this.selProg, s1); gl.attachShader(this.selProg, s2); gl.linkProgram(this.selProg);
+      this.selLoc = {
+        aPos: gl.getAttribLocation(this.selProg, 'aPos'),
+        uProj: gl.getUniformLocation(this.selProg, 'uProj'),
+        uView: gl.getUniformLocation(this.selProg, 'uView'),
+        uOffset: gl.getUniformLocation(this.selProg, 'uOffset'),
+      };
+    }
+    gl.useProgram(this.selProg);
+    gl.uniformMatrix4fv(this.selLoc.uProj, false, this.projMatrix);
+    gl.uniformMatrix4fv(this.selLoc.uView, false, this.viewMatrix);
+    gl.uniform3f(this.selLoc.uOffset, pos[0], pos[1], pos[2]);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.selBuf);
+    gl.enableVertexAttribArray(this.selLoc.aPos);
+    gl.vertexAttribPointer(this.selLoc.aPos, 3, gl.FLOAT, false, 0, 0);
+    gl.enable(gl.BLEND);
+    gl.disable(gl.DEPTH_TEST);
+    gl.drawArrays(gl.LINES, 0, 24);
+    gl.enable(gl.DEPTH_TEST);
   }
 }
 
@@ -1172,7 +1222,7 @@ const Game = {
     this.findSpawnPoint();
 
     // 白天开始（偏移时间到早晨，cycle ≈ 0.2 太阳已升起）
-    this.startTime = performance.now() - 75000;  // 300秒一天，75秒=正午
+    this.startTime = performance.now() - 120000;  // 300秒一天，120秒=正午
     this.lastTime = performance.now();
     this.frameCount = 0;
     this.fpsTimer = 0;
@@ -1517,6 +1567,12 @@ const Game = {
           this.placeBlock();
           this.placeCooldown = 0.2;
         }
+      }
+
+      // 选中方块高亮（render 前设置，render 内画线框）
+      if (!this.dead) {
+        let hit = this.player.raycast();
+        if (hit) this.renderer.selBox = [hit.x, hit.y, hit.z];
       }
 
       // 渲染
