@@ -1149,106 +1149,149 @@ class Renderer {
   // 画玩家模型（简单的方块人：头、身体、双臂、双腿）
   drawPlayerModel(player) {
     let gl = this.gl;
-    if (!this.playerBuf) {
-      // 玩家模型用 6 个 box 组成（头 0.5x0.5x0.5, 身体 0.6x0.9x0.3, 臂 0.25x0.8x0.25 x2, 腿 0.25x0.9x0.25 x2）
-      // 每个 box = 6 面 = 12 三角形 = 36 顶点
-      function boxMesh(ox, oy, oz, sx, sy, sz, r, g, b) {
-        let v = [];
-        function face(f) {
-          let [x0,y0,z0,x1,y1,z1] = f;
-          // 4 corners
-          let p = [[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0]];
-          // 复用 FACES 定义简化
-        }
-        // 直接写 6 面的三角形
-        let x0=ox, y0=oy, z0=oz, x1=ox+sx, y1=oy+sy, z1=oz+sz;
-        function addQuad(a,b,c) { v.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]); }
-        // 用法线作为 extra 数据没用（这里颜色就够了），简化：6 面每面 2 三角形
-        // top (y=y1)
-        addQuad([x0,y1,z0],[x1,y1,z1],[x1,y1,z0]); addQuad([x0,y1,z0],[x0,y1,z1],[x1,y1,z1]);
-        // bottom (y=y0)
-        addQuad([x0,y0,z0],[x1,y0,z0],[x1,y0,z1]); addQuad([x0,y0,z0],[x1,y0,z1],[x0,y0,z1]);
-        // -z (z=z0)
-        addQuad([x0,y0,z0],[x0,y1,z1-0],[x0,y1,z0]); addQuad([x0,y0,z0],[x0,y0,z1],[x0,y1,z1]);
-        // +z (z=z1)
-        // 嗯这方法太啰嗦了，改用索引方式
-        return null;
-      }
-      // 更简洁：直接定义一个 generateBox 返回 {positions, indices}
+    if (!this.playerPosBuf) {
+      // genBox: 返回 {positions, normals, indices}，每个 box 6 面 24 顶点
       function genBox(ox, oy, oz, sx, sy, sz) {
         let x0=ox, y0=oy, z0=oz, x1=ox+sx, y1=oy+sy, z1=oz+sz;
         let positions = [
-          x0,y1,z1, x1,y1,z1, x1,y1,z0, x0,y1,z0,  // top
-          x0,y0,z0, x1,y0,z0, x1,y0,z1, x0,y0,z1,  // bottom
-          x0,y0,z1, x1,y0,z1, x1,y1,z1, x0,y1,z1,  // +z
-          x1,y0,z0, x0,y0,z0, x0,y1,z0, x1,y1,z0,  // -z
-          x1,y0,z1, x1,y0,z0, x1,y1,z0, x1,y1,z1,  // +x
-          x0,y0,z0, x0,y0,z1, x0,y1,z1, x0,y1,z0,  // -x
+          // top (+y)
+          x0,y1,z1, x1,y1,z1, x1,y1,z0, x0,y1,z0,
+          // bottom (-y)
+          x0,y0,z0, x1,y0,z0, x1,y0,z1, x0,y0,z1,
+          // +z
+          x0,y0,z1, x1,y0,z1, x1,y1,z1, x0,y1,z1,
+          // -z
+          x1,y0,z0, x0,y0,z0, x0,y1,z0, x1,y1,z0,
+          // +x
+          x1,y0,z1, x1,y0,z0, x1,y1,z0, x1,y1,z1,
+          // -x
+          x0,y0,z0, x0,y0,z1, x0,y1,z1, x0,y1,z0,
+        ];
+        let normals = [
+          // top
+          0,1,0, 0,1,0, 0,1,0, 0,1,0,
+          // bottom
+          0,-1,0, 0,-1,0, 0,-1,0, 0,-1,0,
+          // +z
+          0,0,1, 0,0,1, 0,0,1, 0,0,1,
+          // -z
+          0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1,
+          // +x
+          1,0,0, 1,0,0, 1,0,0, 1,0,0,
+          // -x
+          -1,0,0, -1,0,0, -1,0,0, -1,0,0,
         ];
         let indices = [];
         for (let i = 0; i < 6; i++) {
           let b = i * 4;
           indices.push(b, b+1, b+2, b, b+2, b+3);
         }
-        return {positions, indices};
+        return {positions, normals, indices};
       }
-      let allPos = [], allIdx = [];
-      let offset = 0;
-      function addBox(ox, oy, oz, sx, sy, sz) {
-        let b = genBox(ox, oy, oz, sx, sy, sz);
-        allPos.push(...b.positions);
-        for (let i of b.indices) allIdx.push(i + offset);
-        offset += 4 * 6;
+
+      // 每个部位：[ox,oy,oz, sx,sy,sz, r,g,b]
+      // 模型相对玩家中心 x=0.5,z=0.5，y=0 在脚下
+      let parts = [
+        // 头：0.5x0.5x0.5，y=1.3~1.8（肤色）
+        [0.25, 1.3, 0.25,  0.5, 0.5, 0.5,  0.85, 0.70, 0.55],
+        // 身体：0.6x0.8x0.3，y=0.5~1.3（蓝衣）
+        [0.2, 0.5, 0.35,   0.6, 0.8, 0.3,   0.25, 0.45, 0.75],
+        // 左臂：0.25x0.8x0.25，y=0.5~1.3（蓝衣袖）
+        [-0.05, 0.5, 0.375, 0.25, 0.8, 0.25, 0.25, 0.45, 0.75],
+        // 右臂
+        [0.8, 0.5, 0.375,  0.25, 0.8, 0.25,  0.25, 0.45, 0.75],
+        // 左腿：0.25x0.5x0.25，y=0~0.5（深蓝裤）
+        [0.25, 0, 0.375,   0.25, 0.5, 0.25,  0.15, 0.20, 0.40],
+        // 右腿
+        [0.5, 0, 0.375,    0.25, 0.5, 0.25,  0.15, 0.20, 0.40],
+      ];
+
+      let allPos = [], allNorm = [], allCol = [], allIdx = [];
+      let vOffset = 0;
+      for (let p of parts) {
+        let b = genBox(p[0], p[1], p[2], p[3], p[4], p[5]);
+        let r = p[6], g = p[7], bl = p[8];
+        for (let i = 0; i < b.positions.length; i += 3) {
+          allPos.push(b.positions[i], b.positions[i+1], b.positions[i+2]);
+          allNorm.push(b.normals[i], b.normals[i+1], b.normals[i+2]);
+          allCol.push(r, g, bl, 1.0);
+        }
+        for (let i of b.indices) allIdx.push(i + vOffset);
+        vOffset += 24;
       }
-      // 模型（相对玩家中心 x=0.5, z=0.5, y=0 在脚下）
-      // 头：0.5x0.5x0.5，在 y=1.5 居中
-      addBox(0.25, 1.5, 0.25, 0.5, 0.5, 0.5);
-      // 身体：0.6x0.9x0.3，y=0.6~1.5
-      addBox(0.2, 0.6, 0.35, 0.6, 0.9, 0.3);
-      // 左臂：0.25x0.8x0.25，x=0~0.25, y=0.7~1.5
-      addBox(-0.05, 0.7, 0.375, 0.25, 0.8, 0.25);
-      // 右臂：0.25x0.8x0.25，x=0.75~1.0
-      addBox(0.8, 0.7, 0.375, 0.25, 0.8, 0.25);
-      // 左腿：0.25x0.6x0.25，x=0.25~0.5
-      addBox(0.25, 0, 0.375, 0.25, 0.6, 0.25);
-      // 右腿：0.25x0.6x0.25，x=0.5~0.75
-      addBox(0.5, 0, 0.375, 0.25, 0.6, 0.25);
 
       this.playerPosBuf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, this.playerPosBuf);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(allPos), gl.STATIC_DRAW);
+      this.playerNormBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.playerNormBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(allNorm), gl.STATIC_DRAW);
+      this.playerColBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.playerColBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(allCol), gl.STATIC_DRAW);
       this.playerIdxBuf = gl.createBuffer();
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.playerIdxBuf);
       gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(allIdx), gl.STATIC_DRAW);
       this.playerIdxCount = allIdx.length;
 
-      // 玩家 shader（单色，不走纹理）
+      // 带 directional 光照的 shader
       let vs = `
-        attribute vec3 aPos; uniform mat4 uProj; uniform mat4 uView; uniform vec3 uOffset; uniform vec3 uColor;
-        varying vec3 vColor;
-        void main() { vColor = uColor; gl_Position = uProj * uView * vec4(aPos + uOffset, 1.0); }`;
-      let fs = `precision mediump float; varying vec3 vColor; void main() { gl_FragColor = vec4(vColor, 1.0); }`;
+        attribute vec3 aPos; attribute vec3 aNormal; attribute vec4 aColor;
+        uniform mat4 uProj; uniform mat4 uView; uniform vec3 uOffset;
+        varying vec3 vNormal; varying vec4 vColor;
+        void main() {
+          gl_Position = uProj * uView * vec4(aPos + uOffset, 1.0);
+          vNormal = aNormal; vColor = aColor;
+        }`;
+      let fs = `
+        precision mediump float;
+        varying vec3 vNormal; varying vec4 vColor;
+        uniform vec3 uSunDir;
+        void main() {
+          vec3 n = normalize(vNormal);
+          float light = max(dot(n, normalize(uSunDir)), 0.0);
+          float amb = 0.35;
+          float bright = light * 0.65 + amb;
+          // AO: 顶面最亮 侧暗 底最暗
+          float ao = 1.0;
+          if (abs(n.y) < 0.1) ao = 0.80;
+          else if (n.y < -0.5) ao = 0.60;
+          vec3 color = vColor.rgb * bright * ao;
+          gl_FragColor = vec4(color, 1.0);
+        }`;
       let s1 = compileShader(gl, vs, gl.VERTEX_SHADER);
       let s2 = compileShader(gl, fs, gl.FRAGMENT_SHADER);
       this.playerProg = linkProgram(gl, s1, s2);
       this.playerLoc = {
         aPos: gl.getAttribLocation(this.playerProg, 'aPos'),
+        aNormal: gl.getAttribLocation(this.playerProg, 'aNormal'),
+        aColor: gl.getAttribLocation(this.playerProg, 'aColor'),
         uProj: gl.getUniformLocation(this.playerProg, 'uProj'),
         uView: gl.getUniformLocation(this.playerProg, 'uView'),
         uOffset: gl.getUniformLocation(this.playerProg, 'uOffset'),
-        uColor: gl.getUniformLocation(this.playerProg, 'uColor'),
+        uSunDir: gl.getUniformLocation(this.playerProg, 'uSunDir'),
       };
     }
     gl.useProgram(this.playerProg);
     gl.uniformMatrix4fv(this.playerLoc.uProj, false, this.projMatrix);
     gl.uniformMatrix4fv(this.playerLoc.uView, false, this.viewMatrix);
-    // 偏移到玩家位置（模型坐标 x,z 在 0~1，玩家中心在 0.5 所以 offset 减 0.5）
     gl.uniform3f(this.playerLoc.uOffset, player.x - 0.5, player.y, player.z - 0.5);
-    // 整体用一个蓝灰色（先整模型上色，后续可分部位上色）
-    gl.uniform3f(this.playerLoc.uColor, 0.3, 0.5, 0.8);  // 蓝色衣服
+    // 光照方向（和主 renderer 同步）
+    let gameTime = (performance.now() - Game.startTime) / 1000;
+    let dayCycle = (gameTime / 300) % 1.0;
+    let sunAngle = dayCycle * Math.PI * 2 - Math.PI / 2;
+    let sunY = Math.sin(sunAngle); let sunX = Math.cos(sunAngle);
+    gl.uniform3f(this.playerLoc.uSunDir, sunX, Math.max(-0.3, sunY), 0.3);
+
     gl.bindBuffer(gl.ARRAY_BUFFER, this.playerPosBuf);
     gl.enableVertexAttribArray(this.playerLoc.aPos);
     gl.vertexAttribPointer(this.playerLoc.aPos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.playerNormBuf);
+    gl.enableVertexAttribArray(this.playerLoc.aNormal);
+    gl.vertexAttribPointer(this.playerLoc.aNormal, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.playerColBuf);
+    gl.enableVertexAttribArray(this.playerLoc.aColor);
+    gl.vertexAttribPointer(this.playerLoc.aColor, 4, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.playerIdxBuf);
     gl.disable(gl.BLEND);
     gl.enable(gl.DEPTH_TEST);
