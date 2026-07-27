@@ -888,6 +888,7 @@ class Renderer {
     let eyeX = player.x - fwdX * camDist;
     let eyeY = player.y + camHeight - fwdY * camDist;
     let eyeZ = player.z - fwdZ * camDist;
+    this._lastEyeX = eyeX; this._lastEyeY = eyeY; this._lastEyeZ = eyeZ;
     // 第一人称：看向摄像机前方；第三人称：看向玩家身体（能看到模型）
     let centerX, centerY, centerZ;
     if (player.thirdPerson) {
@@ -970,6 +971,15 @@ class Renderer {
     if (player.thirdPerson) {
       this.drawPlayerModel(player);
     }
+
+    // debug: 写入 window
+    window._dbg = {
+      third: player.thirdPerson,
+      eye: [this._lastEyeX||0, this._lastEyeY||0, this._lastEyeZ||0],
+      draws: this._playerDrawCount||0,
+      mat: this._debugModelMatrix ? [this._debugModelMatrix[12], this._debugModelMatrix[13], this._debugModelMatrix[14]] : null,
+     _FB: true,
+    };
 
     return { renderedChunks, blockCount };
   }
@@ -1259,7 +1269,6 @@ class Renderer {
           float light = max(dot(n, normalize(uSunDir)), 0.0);
           float amb = 0.35;
           float bright = light * 0.65 + amb;
-          // AO: 顶面最亮 侧暗 底最暗
           float ao = 1.0;
           if (abs(n.y) < 0.1) ao = 0.80;
           else if (n.y < -0.5) ao = 0.60;
@@ -1285,11 +1294,12 @@ class Renderer {
     // 模型矩阵：先平移到玩家位置，再绕脚下中心旋转 facingY
     // 旋转中心 = 模型坐标 (0.5, 0, 0.5)
     let m = mat4.identity(mat4.create());
-    mat4.translate(m, m, [player.x, player.y, player.z]);
-    mat4.translate(m, m, [0.5, 0, 0.5]);
-    mat4.rotateY(m, m, player.facingY);
-    mat4.translate(m, m, [-0.5, 0, -0.5]);
+    mat4.translate(m, player.x, player.y, player.z);
+    mat4.translate(m, 0.5, 0, 0.5);
+    mat4.rotateY(m, player.facingY);
+    mat4.translate(m, -0.5, 0, -0.5);
     gl.uniformMatrix4fv(this.playerLoc.uModel, false, m);
+    this._debugModelMatrix = new Float32Array(m);  // debug
     // 光照方向（和主 renderer 同步）
     let gameTime = (performance.now() - Game.startTime) / 1000;
     let dayCycle = (gameTime / 300) % 1.0;
