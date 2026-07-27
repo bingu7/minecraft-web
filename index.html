@@ -131,7 +131,11 @@
   <button class="btn" onclick="Game.resume()">继续游戏</button>
   <button class="btn secondary" onclick="Game.respawn()">重生</button>
   <button class="btn secondary" onclick="Game.save()">保存世界</button>
-  <div class="hint">按 ESC 继续 | WASD 移动 | 空格跳跃 | 鼠标左键破坏 | 右键放置 | 滚轮/1-9 切换方块</div>
+  <div style="margin-top:20px;color:#ccc;font-size:14px;">
+    <label>鼠标灵敏度: <span id="sens-val">50</span>%</label><br>
+    <input type="range" id="sens-slider" min="10" max="200" value="50" style="width:200px;margin-top:8px;cursor:pointer;">
+  </div>
+  <div class="hint">按 ESC 继续 | WASD 移动 | 空格跳跃 | F 飞行 | V 切换视角 | 鼠标左键破坏 | 右键放置 | 滚轮/1-9 切换方块</div>
 </div>
 
 <div id="death-screen" style="position:fixed;inset:0;background:rgba(60,0,0,0.7);display:none;align-items:center;justify-content:center;z-index:200;flex-direction:column;color:#fff;">

@@ -1272,7 +1272,7 @@ class Player {
     this.height = 1.8;
     this.eyeHeight = 1.62;
     this.speed = 4.5;
-    this.flySpeed = 8;
+    this.flySpeed = 12;
     this.flying = false;
     this.thirdPerson = false;
     this.health = 20;
@@ -1499,6 +1499,18 @@ const Game = {
     this.mouseLocked = false;
     this.mouseSensitivity = 0.0025;
     this.cameraMode = "first";  // "first" | "third"
+
+    // 灵敏度滑块绑定
+    let slider = document.getElementById("sens-slider");
+    let sval = document.getElementById("sens-val");
+    if (slider) {
+      slider.addEventListener("input", () => {
+        let pct = parseInt(slider.value);
+        sval.textContent = pct;
+        // 10% = 0.0005, 50% = 0.0025(默认), 200% = 0.01
+        this.mouseSensitivity = 0.0005 + (pct / 100) * 0.0045;
+      });
+    }
     this.breakingBlock = null;
     this.breakingProgress = 0;
     this.placeCooldown = 0;
@@ -1660,9 +1672,6 @@ const Game = {
       if (e.code === "Escape") this.togglePause();
       if (e.code === "KeyF") this.player.flying = !this.player.flying;
       if (e.code === "KeyV") this.toggleCameraMode();
-      // 鼠标灵敏度调节（[ 降，] 升）
-      if (e.code === "BracketLeft") { this.mouseSensitivity = Math.max(0.0005, this.mouseSensitivity * 0.8); console.log("sens=" + this.mouseSensitivity.toFixed(4)); }
-      if (e.code === "BracketRight") { this.mouseSensitivity = Math.min(0.01, this.mouseSensitivity * 1.25); console.log("sens=" + this.mouseSensitivity.toFixed(4)); }
       // 数字键选择物品栏
       if (e.code >= "Digit1" && e.code <= "Digit9") {
         this.selectSlot(parseInt(e.code.slice(-1)) - 1);
